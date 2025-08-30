@@ -5,26 +5,31 @@ const { Pool } = require('pg');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-require('dotenv').config();
+// Konfigurasi CORS (sesuaikan dengan URL frontend)
+app.use(cors({ origin: process.env.FRONTEND_URL || '*' })); // Ganti '*' dengan URL frontend jika ada
+app.use(express.json());
 
 // Konfigurasi koneksi database
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false } // Penting untuk Railway
+  ssl: { rejectUnauthorized: false }
 });
 
 // Tes koneksi saat start
 pool.connect((err, client, release) => {
   if (err) {
-    console.error('Koneksi database gagal:', err.stack);
-    return;
+    console.error('Gagal terhubung ke database:', err.stack);
+    process.exit(1); // Hentikan server jika koneksi gagal
   }
   console.log('Koneksi database berhasil!');
   release();
 });
 
-app.use(cors());
-app.use(express.json());
+// Middleware untuk logging request (opsional, untuk debugging)
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+  next();
+});
 
 // Endpoint produk
 app.get('/api/products', async (req, res) => {
@@ -33,7 +38,7 @@ app.get('/api/products', async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error('Error di /api/products:', err.stack);
-    res.status(500).send('Error mengambil data produk');
+    res.status(500).json({ error: 'Gagal mengambil data produk' });
   }
 });
 
@@ -41,29 +46,31 @@ app.get('/api/products/:id', async (req, res) => {
   const { id } = req.params;
   try {
     const result = await pool.query('SELECT * FROM products WHERE id = $1', [id]);
-    if (result.rows.length === 0) return res.status(404).send('Produk tidak ditemukan');
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Produk tidak ditemukan' });
+    }
     res.json(result.rows[0]);
   } catch (err) {
     console.error('Error di /api/products/:id:', err.stack);
-    res.status(500).send('Error mengambil detail produk');
+    res.status(500).json({ error: 'Gagal mengambil detail produk' });
   }
 });
 
 // Endpoint cart - tambah item
 app.post('/api/cart', async (req, res) => {
   const { user_id, product_id, quantity } = req.body;
+  if (!product_id || !quantity) {
+    return res.status(400).json({ error: 'product_id dan quantity diperlukan' });
+  }
   try {
     const existingItem = await pool.query('SELECT * FROM cart WHERE product_id = $1', [product_id]);
-
     if (existingItem.rows.length > 0) {
-      // Jika produk sudah ada, perbarui kuantitas
       const updatedItem = await pool.query(
         'UPDATE cart SET quantity = quantity + $1 WHERE product_id = $2 RETURNING *',
         [quantity, product_id]
       );
       return res.status(200).json(updatedItem.rows[0]);
     } else {
-      // Jika produk belum ada, masukkan item baru
       const result = await pool.query(
         'INSERT INTO cart (user_id, product_id, quantity) VALUES ($1, $2, $3) RETURNING *',
         [user_id, product_id, quantity]
@@ -72,18 +79,20 @@ app.post('/api/cart', async (req, res) => {
     }
   } catch (err) {
     console.error('Error menambahkan ke cart:', err.stack);
-    res.status(500).send('Error menambahkan data ke keranjang');
+    res.status(500).json({ error: 'Gagal menambahkan ke keranjang' });
   }
 });
 
 // Endpoint cart - ambil semua item
 app.get('/api/cart', async (req, res) => {
   try {
-    const result = await pool.query('SELECT c.*, p.name, p.price, p.image FROM cart c JOIN products p ON c.product_id = p.id');
+    const result = await pool.query(
+      'SELECT c.*, p.name, p.price, p.image FROM cart c JOIN products p ON c.product_id = p.id'
+    );
     res.json(result.rows);
   } catch (err) {
     console.error('Error mengambil cart:', err.stack);
-    res.status(500).send('Error mengambil data keranjang');
+    res.status(500).json({ error: 'Gagal mengambil data keranjang' });
   }
 });
 
@@ -91,16 +100,21 @@ app.get('/api/cart', async (req, res) => {
 app.put('/api/cart/:id', async (req, res) => {
   const { id } = req.params;
   const { quantity } = req.body;
+  if (!quantity) {
+    return res.status(400).json({ error: 'quantity diperlukan' });
+  }
   try {
     const result = await pool.query(
       'UPDATE cart SET quantity = $1 WHERE id = $2 RETURNING *',
       [quantity, id]
     );
-    if (result.rows.length === 0) return res.status(404).send('Item tidak ditemukan');
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Item tidak ditemukan' });
+    }
     res.json(result.rows[0]);
   } catch (err) {
     console.error('Error memperbarui cart:', err.stack);
-    res.status(500).send('Error memperbarui kuantitas');
+    res.status(500).json({ error: 'Gagal memperbarui kuantitas' });
   }
 });
 
@@ -109,12 +123,20 @@ app.delete('/api/cart/:id', async (req, res) => {
   const { id } = req.params;
   try {
     const result = await pool.query('DELETE FROM cart WHERE id = $1 RETURNING *', [id]);
-    if (result.rows.length === 0) return res.status(404).send('Item tidak ditemukan');
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Item tidak ditemukan' });
+    }
     res.status(204).send();
   } catch (err) {
     console.error('Error menghapus dari cart:', err.stack);
-    res.status(500).send('Error menghapus item dari keranjang');
+    res.status(500).json({ error: 'Gagal menghapus item dari keranjang' });
   }
+});
+
+// Middleware untuk menangkap error tak terduga
+app.use((err, req, res, next) => {
+  console.error('Error tak terduga:', err.stack);
+  res.status(500).json({ error: 'Terjadi kesalahan server' });
 });
 
 // Jalankan server
