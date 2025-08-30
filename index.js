@@ -19,16 +19,20 @@ const pool = new Pool({
 pool.connect((err, client, release) => {
   if (err) {
     console.error('Gagal terhubung ke database:', err.stack);
-    process.exit(1); // Hentikan server jika koneksi gagal
+  } else {
+    console.log('Koneksi database berhasil!');
+    release();
   }
-  console.log('Koneksi database berhasil!');
-  release();
 });
 
 // Middleware untuk logging request
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
   next();
+});
+
+app.get("/", (req, res) => {
+  res.send("Backend is running ✅");
 });
 
 // Endpoint produk
