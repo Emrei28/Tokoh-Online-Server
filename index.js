@@ -2,16 +2,14 @@
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
-const jwt = require('jsonwebtoken');
-const bcrypt = require('bcrypt');
-// const { OAuth2Client } = require('google-auth-library'); // Baris ini dihapus
+const jwt = require('jsonwebtoken'); // Import JWT
+const bcrypt = require('bcrypt'); // Import bcrypt
 
 const app = express();
 
+// Konfigurasi environment variables
 const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_jwt_key';
 const SALT_ROUNDS = 10;
-// const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || 'MASUKKAN_CLIENT_ID_GOOGLE_ANDA_DI_SINI'; // Baris ini dihapus
-// const client = new OAuth2Client(GOOGLE_CLIENT_ID); // Baris ini dihapus
 
 app.use(cors({ origin: process.env.FRONTEND_URL || 'https://tokohonline.netlify.app', credentials: true }));
 app.use(express.json());
@@ -33,6 +31,7 @@ const pool = new Pool({
   }
 })();
 
+// Middleware untuk memverifikasi JWT
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -50,6 +49,8 @@ const authenticateToken = (req, res, next) => {
     next();
   });
 };
+
+// --- Rute Baru untuk Autentikasi ---
 
 // Rute Registrasi Pengguna
 app.post('/api/auth/register', async (req, res) => {
@@ -116,7 +117,8 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// Semua rute lainnya di sini tetap sama
+// --- Modifikasi Rute Cart yang Sudah Ada ---
+
 app.post('/api/cart', authenticateToken, async (req, res) => {
   const user_id = req.user ? req.user.id : null;
   const { product_id, quantity } = req.body;
@@ -199,6 +201,7 @@ app.delete('/api/cart/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// Rute lainnya tidak perlu diubah karena tidak memerlukan otentikasi
 app.get('/', (req, res) => {
   res.json({ message: '✅ Backend is running!' });
 });
