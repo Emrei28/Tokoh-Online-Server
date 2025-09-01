@@ -102,7 +102,7 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// Endpoint profil pengguna (opsional)
+// Endpoint profil pengguna
 app.get('/api/user', authenticateToken, async (req, res) => {
   const user_id = req.user.user_id;
   try {
