@@ -3,15 +3,9 @@ const cors = require('cors');
 const { Pool } = require('pg');
 
 const app = express();
-const PORT = process.env.PORT || 5000;
 
-app.use(cors({ origin: process.env.FRONTEND_URL || '*', optionsSuccessStatus: 200, credentials: true }));
+app.use(cors({ origin: process.env.FRONTEND_URL || 'https://tokohonline.netlify.app', credentials: true }));
 app.use(express.json());
-
-console.log('Environment variables:');
-console.log('  DATABASE_URL:', process.env.DATABASE_URL || 'Tidak diatur');
-console.log('  FRONTEND_URL:', process.env.FRONTEND_URL || 'Tidak diatur');
-console.log('  NODE_ENV:', process.env.NODE_ENV || 'Tidak diatur');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -30,47 +24,22 @@ const pool = new Pool({
   }
 })();
 
-app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.url} - Origin: ${req.get('origin')}`);
-  next();
-});
-
 app.get('/health', (req, res) => {
   res.status(200).json({
     status: 'Server berjalan',
     database_url: process.env.DATABASE_URL || 'Tidak diatur',
     frontend_url: process.env.FRONTEND_URL || 'Tidak diatur',
-    node_env: process.env.NODE_ENV || 'Tidak diatur',
     timestamp: new Date().toISOString(),
   });
-});
-
-app.get('/', (req, res) => {
-  res.json({ message: '✅ Backend is running!' });
 });
 
 app.get('/api/products', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM products ORDER BY id ASC');
-    console.log(`Mengambil ${result.rows.length} produk`);
     res.json(result.rows);
   } catch (err) {
     console.error('Error di /api/products:', err.message);
     res.status(500).json({ error: 'Gagal mengambil data produk' });
-  }
-});
-
-app.get('/api/products/:id', async (req, res) => {
-  const { id } = req.params;
-  try {
-    const result = await pool.query('SELECT * FROM products WHERE id = $1', [id]);
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Produk tidak ditemukan' });
-    }
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error('Error di /api/products/:id:', err.message);
-    res.status(500).json({ error: 'Gagal mengambil detail produk' });
   }
 });
 
@@ -108,7 +77,6 @@ app.get('/api/cart', async (req, res) => {
     const result = await pool.query(
       'SELECT c.*, p.name, p.price, p.image FROM cart c JOIN products p ON c.product_id = p.id'
     );
-    console.log(`Mengambil ${result.rows.length} item cart`);
     res.json(result.rows);
   } catch (err) {
     console.error('Error mengambil cart:', err.message);
@@ -116,50 +84,4 @@ app.get('/api/cart', async (req, res) => {
   }
 });
 
-app.put('/api/cart/:id', async (req, res) => {
-  const { id } = req.params;
-  const { quantity } = req.body;
-  if (!quantity) {
-    return res.status(400).json({ error: 'quantity diperlukan' });
-  }
-  try {
-    const result = await pool.query(
-      'UPDATE cart SET quantity = $1 WHERE id = $2 RETURNING *',
-      [quantity, id]
-    );
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Item tidak ditemukan' });
-    }
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error('Error memperbarui cart:', err.message);
-    res.status(500).json({ error: 'Gagal memperbarui kuantitas' });
-  }
-});
-
-app.delete('/api/cart/:id', async (req, res) => {
-  const { id } = req.params;
-  try {
-    const result = await pool.query('DELETE FROM cart WHERE id = $1 RETURNING *', [id]);
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Item tidak ditemukan' });
-    }
-    res.status(204).send();
-  } catch (err) {
-    console.error('Error menghapus dari cart:', err.message);
-    res.status(500).json({ error: 'Gagal menghapus item dari keranjang' });
-  }
-});
-
-app.use((err, req, res, next) => {
-  console.error('Error tak terduga:', err.message);
-  res.status(500).json({ error: 'Terjadi kesalahan server' });
-});
-
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Server berjalan di http://0.0.0.0:${PORT}`);
-  console.log('Environment variables (server start):');
-  console.log('  DATABASE_URL:', process.env.DATABASE_URL || 'Tidak diatur');
-  console.log('  FRONTEND_URL:', process.env.FRONTEND_URL || 'Tidak diatur');
-  console.log('  NODE_ENV:', process.env.NODE_ENV || 'Tidak diatur');
-});
+module.exports = app; // Tambahkan ini untuk Vercel
