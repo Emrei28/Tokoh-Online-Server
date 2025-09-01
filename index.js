@@ -10,14 +10,17 @@ const allowedOrigin = process.env.FRONTEND_URL || '*';
 app.use(cors({ origin: allowedOrigin }));
 app.use(express.json());
 
+// Log variabel lingkungan untuk debugging
+console.log('Environment variables:');
+console.log('  DATABASE_URL:', process.env.DATABASE_URL || 'Tidak diatur');
+console.log('  FRONTEND_URL:', process.env.FRONTEND_URL || 'Tidak diatur');
+console.log('  NODE_ENV:', process.env.NODE_ENV || 'Tidak diatur');
+
 // Pool PostgreSQL
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
 });
-
-// Log DATABASE_URL untuk debugging
-console.log('DATABASE_URL:', process.env.DATABASE_URL || 'Tidak diatur');
 
 // Tes koneksi database sekali saat startup
 (async () => {
@@ -41,6 +44,8 @@ app.get('/health', (req, res) => {
   res.status(200).json({
     status: 'Server berjalan',
     database_url: process.env.DATABASE_URL || 'Tidak diatur',
+    frontend_url: process.env.FRONTEND_URL || 'Tidak diatur',
+    node_env: process.env.NODE_ENV || 'Tidak diatur',
     timestamp: new Date().toISOString(),
   });
 });
@@ -164,5 +169,8 @@ app.use((err, req, res, next) => {
 // ------------------ START SERVER ------------------
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server berjalan di http://0.0.0.0:${PORT}`);
-  console.log('DATABASE_URL:', process.env.DATABASE_URL || 'Tidak diatur');
+  console.log('Environment variables (server start):');
+  console.log('  DATABASE_URL:', process.env.DATABASE_URL || 'Tidak diatur');
+  console.log('  FRONTEND_URL:', process.env.FRONTEND_URL || 'Tidak diatur');
+  console.log('  NODE_ENV:', process.env.NODE_ENV || 'Tidak diatur');
 });
