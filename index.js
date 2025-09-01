@@ -2,8 +2,8 @@
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
-const jwt = require('jsonwebtoken'); // Import JWT
-const bcrypt = require('bcrypt'); // Import bcrypt
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
 
 const app = express();
 
@@ -201,7 +201,7 @@ app.delete('/api/cart/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Rute lainnya tidak perlu diubah karena tidak memerlukan otentikasi
+// Rute lainnya
 app.get('/', (req, res) => {
   res.json({ message: '✅ Backend is running!' });
 });
