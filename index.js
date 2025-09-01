@@ -2,14 +2,19 @@
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
-const jwt = require('jsonwebtoken'); // Import JWT
-const bcrypt = require('bcrypt'); // Import bcrypt
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
+const { OAuth2Client } = require('google-auth-library'); // <--- Tambahan: Impor Google Auth Library
 
 const app = express();
 
 // Konfigurasi environment variables
-const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_jwt_key'; // Ganti dengan kunci rahasia yang kuat!
-const SALT_ROUNDS = 10; // Jumlah putaran untuk enkripsi bcrypt, nilai yang direkomendasikan adalah 10-12
+const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_jwt_key';
+const SALT_ROUNDS = 10;
+// <--- Tambahan: ID Klien Google Anda
+// Penting: Ganti placeholder di bawah dengan Client ID Anda dari Google Cloud Console
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || 'MASUKKAN_CLIENT_ID_GOOGLE_ANDA_DI_SINI'; 
+const client = new OAuth2Client(GOOGLE_CLIENT_ID); // <--- Tambahan: Inisialisasi Google OAuth Client
 
 app.use(cors({ origin: process.env.FRONTEND_URL || 'https://tokohonline.netlify.app', credentials: true }));
 app.use(express.json());
@@ -37,25 +42,23 @@ const authenticateToken = (req, res, next) => {
   const token = authHeader && authHeader.split(' ')[1];
 
   if (token == null) {
-    // Jika tidak ada token, izinkan request jika tidak ada user_id yang dikirim
-    // Ini penting agar keranjang tanpa login tetap bisa digunakan
     req.user = null;
     return next();
   }
 
   jwt.verify(token, JWT_SECRET, (err, user) => {
     if (err) {
-      // Jika token tidak valid atau kadaluarsa
       return res.status(403).json({ error: 'Token tidak valid' });
     }
-    req.user = user; // Menyimpan data user ke dalam objek request
+    req.user = user;
     next();
   });
 };
 
-// --- Rute Baru untuk Autentikasi ---
+// --- Rute Autentikasi yang Dimodifikasi ---
 
-// Rute Registrasi Pengguna
+// Rute Registrasi Pengguna (Dimodifikasi)
+// Sekarang rute ini akan mengembalikan token agar pengguna langsung login setelah mendaftar
 app.post('/api/auth/register', async (req, res) => {
   const { full_name, email, password, address, city, postal_code } = req.body;
 
@@ -64,34 +67,34 @@ app.post('/api/auth/register', async (req, res) => {
   }
 
   try {
-    // Periksa apakah email sudah terdaftar
     const existingUser = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
     if (existingUser.rows.length > 0) {
       return res.status(409).json({ error: 'Email sudah terdaftar.' });
     }
 
-    // Hash password
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
 
-    // Simpan pengguna baru ke database
     const result = await pool.query(
       'INSERT INTO users (full_name, email, password, address, city, postal_code) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, full_name, email',
       [full_name, email, hashedPassword, address, city, postal_code]
     );
 
-    res.status(201).json({ message: 'Registrasi berhasil!', user: result.rows[0] });
+    const user = result.rows[0];
+    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '1h' });
+
+    // Mengirim token dan data pengguna
+    res.status(201).json({ message: 'Registrasi berhasil!', token, user });
   } catch (err) {
     console.error('Error saat registrasi:', err.message);
     res.status(500).json({ error: 'Gagal melakukan registrasi.' });
   }
 });
 
-// Rute Login Pengguna
+// Rute Login Pengguna (Tidak Berubah)
 app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
 
   try {
-    // Cari pengguna berdasarkan email
     const userResult = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
     if (userResult.rows.length === 0) {
       return res.status(401).json({ error: 'Email atau password salah.' });
@@ -99,16 +102,13 @@ app.post('/api/auth/login', async (req, res) => {
 
     const user = userResult.rows[0];
 
-    // Bandingkan password
     const passwordMatch = await bcrypt.compare(password, user.password);
     if (!passwordMatch) {
       return res.status(401).json({ error: 'Email atau password salah.' });
     }
 
-    // Buat token JWT
     const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '1h' });
 
-    // Kirim token dan info user (tanpa password)
     res.json({
       message: 'Login berhasil!',
       token,
@@ -124,11 +124,60 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// --- Modifikasi Rute yang Sudah Ada ---
+// <--- Tambahan: Rute baru untuk Autentikasi Google
+app.post('/api/auth/google', async (req, res) => {
+  const { token } = req.body;
 
-// Modifikasi Rute Cart POST
+  if (!token) {
+    return res.status(400).json({ error: 'Token Google diperlukan.' });
+  }
+
+  try {
+    const ticket = await client.verifyIdToken({
+      idToken: token,
+      audience: GOOGLE_CLIENT_ID,
+    });
+    const payload = ticket.getPayload();
+    const { sub: googleId, email, name, picture } = payload;
+
+    // Cari pengguna di database berdasarkan email
+    let userResult = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    let user;
+    let message;
+
+    if (userResult.rows.length === 0) {
+      // Jika pengguna belum ada, daftarkan pengguna baru
+      const newUserResult = await pool.query(
+        'INSERT INTO users (full_name, email, profile_picture) VALUES ($1, $2, $3) RETURNING id, full_name, email',
+        [name, email, picture]
+      );
+      user = newUserResult.rows[0];
+      message = 'Registrasi dengan Google berhasil!';
+    } else {
+      // Jika pengguna sudah ada, update info dan login
+      user = userResult.rows[0];
+      // Update nama atau foto profil jika diperlukan
+      await pool.query(
+        'UPDATE users SET full_name = $1, profile_picture = $2 WHERE email = $3',
+        [name, picture, email]
+      );
+      message = 'Login dengan Google berhasil!';
+    }
+
+    // Buat token JWT untuk sesi
+    const authToken = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '1h' });
+
+    res.json({ message, token: authToken, user });
+
+  } catch (err) {
+    console.error('Error saat autentikasi Google:', err.message);
+    res.status(500).json({ error: 'Gagal melakukan autentikasi dengan Google.' });
+  }
+});
+
+// --- Rute Cart dan Produk yang Sudah Ada (Tidak Berubah) ---
+
 app.post('/api/cart', authenticateToken, async (req, res) => {
-  // Ambil user_id dari token jika ada, jika tidak, biarkan null
   const user_id = req.user ? req.user.id : null;
   const { product_id, quantity } = req.body;
 
@@ -160,11 +209,9 @@ app.post('/api/cart', authenticateToken, async (req, res) => {
   }
 });
 
-// Modifikasi Rute Cart GET
 app.get('/api/cart', authenticateToken, async (req, res) => {
   const user_id = req.user ? req.user.id : null;
   try {
-    // Ambil item cart berdasarkan user_id
     const result = await pool.query(
       'SELECT c.*, p.name, p.price, p.image FROM cart c JOIN products p ON c.product_id = p.id WHERE c.user_id IS NOT DISTINCT FROM $1 ORDER BY c.id',
       [user_id]
@@ -177,7 +224,6 @@ app.get('/api/cart', authenticateToken, async (req, res) => {
   }
 });
 
-// Tambahkan middleware `authenticateToken` ke rute yang memerlukan otentikasi
 app.put('/api/cart/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { quantity } = req.body;
@@ -188,7 +234,6 @@ app.put('/api/cart/:id', authenticateToken, async (req, res) => {
   }
 
   try {
-    // Pastikan item yang akan diupdate milik user yang sedang login
     const result = await pool.query(
       'UPDATE cart SET quantity = $1 WHERE id = $2 AND user_id IS NOT DISTINCT FROM $3 RETURNING *',
       [quantity, id, user_id]
@@ -219,7 +264,6 @@ app.delete('/api/cart/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Rute lainnya tidak perlu diubah karena tidak memerlukan otentikasi
 app.get('/', (req, res) => {
   res.json({ message: '✅ Backend is running!' });
 });
