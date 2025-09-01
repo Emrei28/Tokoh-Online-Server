@@ -4,17 +4,14 @@ const cors = require('cors');
 const { Pool } = require('pg');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
-const { OAuth2Client } = require('google-auth-library'); // <--- Tambahan: Impor Google Auth Library
+// const { OAuth2Client } = require('google-auth-library'); // Baris ini dihapus
 
 const app = express();
 
-// Konfigurasi environment variables
 const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_jwt_key';
 const SALT_ROUNDS = 10;
-// <--- Tambahan: ID Klien Google Anda
-// Penting: Ganti placeholder di bawah dengan Client ID Anda dari Google Cloud Console
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || 'MASUKKAN_CLIENT_ID_GOOGLE_ANDA_DI_SINI'; 
-const client = new OAuth2Client(GOOGLE_CLIENT_ID); // <--- Tambahan: Inisialisasi Google OAuth Client
+// const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || 'MASUKKAN_CLIENT_ID_GOOGLE_ANDA_DI_SINI'; // Baris ini dihapus
+// const client = new OAuth2Client(GOOGLE_CLIENT_ID); // Baris ini dihapus
 
 app.use(cors({ origin: process.env.FRONTEND_URL || 'https://tokohonline.netlify.app', credentials: true }));
 app.use(express.json());
@@ -36,7 +33,6 @@ const pool = new Pool({
   }
 })();
 
-// Middleware untuk memverifikasi JWT
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -55,10 +51,7 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-// --- Rute Autentikasi yang Dimodifikasi ---
-
-// Rute Registrasi Pengguna (Dimodifikasi)
-// Sekarang rute ini akan mengembalikan token agar pengguna langsung login setelah mendaftar
+// Rute Registrasi Pengguna
 app.post('/api/auth/register', async (req, res) => {
   const { full_name, email, password, address, city, postal_code } = req.body;
 
@@ -82,7 +75,6 @@ app.post('/api/auth/register', async (req, res) => {
     const user = result.rows[0];
     const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '1h' });
 
-    // Mengirim token dan data pengguna
     res.status(201).json({ message: 'Registrasi berhasil!', token, user });
   } catch (err) {
     console.error('Error saat registrasi:', err.message);
@@ -90,7 +82,7 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 
-// Rute Login Pengguna (Tidak Berubah)
+// Rute Login Pengguna
 app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
 
@@ -124,67 +116,13 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// <--- Tambahan: Rute baru untuk Autentikasi Google
-app.post('/api/auth/google', async (req, res) => {
-  const { token } = req.body;
-
-  if (!token) {
-    return res.status(400).json({ error: 'Token Google diperlukan.' });
-  }
-
-  try {
-    const ticket = await client.verifyIdToken({
-      idToken: token,
-      audience: GOOGLE_CLIENT_ID,
-    });
-    const payload = ticket.getPayload();
-    const { sub: googleId, email, name, picture } = payload;
-
-    // Cari pengguna di database berdasarkan email
-    let userResult = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
-    let user;
-    let message;
-
-    if (userResult.rows.length === 0) {
-      // Jika pengguna belum ada, daftarkan pengguna baru
-      const newUserResult = await pool.query(
-        'INSERT INTO users (full_name, email, profile_picture) VALUES ($1, $2, $3) RETURNING id, full_name, email',
-        [name, email, picture]
-      );
-      user = newUserResult.rows[0];
-      message = 'Registrasi dengan Google berhasil!';
-    } else {
-      // Jika pengguna sudah ada, update info dan login
-      user = userResult.rows[0];
-      // Update nama atau foto profil jika diperlukan
-      await pool.query(
-        'UPDATE users SET full_name = $1, profile_picture = $2 WHERE email = $3',
-        [name, picture, email]
-      );
-      message = 'Login dengan Google berhasil!';
-    }
-
-    // Buat token JWT untuk sesi
-    const authToken = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '1h' });
-
-    res.json({ message, token: authToken, user });
-
-  } catch (err) {
-    console.error('Error saat autentikasi Google:', err.message);
-    res.status(500).json({ error: 'Gagal melakukan autentikasi dengan Google.' });
-  }
-});
-
-// --- Rute Cart dan Produk yang Sudah Ada (Tidak Berubah) ---
-
+// Semua rute lainnya di sini tetap sama
 app.post('/api/cart', authenticateToken, async (req, res) => {
   const user_id = req.user ? req.user.id : null;
   const { product_id, quantity } = req.body;
-
   if (!product_id || !quantity) {
     return res.status(400).json({ error: 'product_id dan quantity diperlukan' });
   }
-
   try {
     const existingItem = await pool.query(
       'SELECT * FROM cart WHERE product_id = $1 AND user_id IS NOT DISTINCT FROM $2',
@@ -228,11 +166,9 @@ app.put('/api/cart/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { quantity } = req.body;
   const user_id = req.user ? req.user.id : null;
-
   if (!quantity) {
     return res.status(400).json({ error: 'quantity diperlukan' });
   }
-
   try {
     const result = await pool.query(
       'UPDATE cart SET quantity = $1 WHERE id = $2 AND user_id IS NOT DISTINCT FROM $3 RETURNING *',
@@ -251,7 +187,6 @@ app.put('/api/cart/:id', authenticateToken, async (req, res) => {
 app.delete('/api/cart/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const user_id = req.user ? req.user.id : null;
-
   try {
     const result = await pool.query('DELETE FROM cart WHERE id = $1 AND user_id IS NOT DISTINCT FROM $2 RETURNING *', [id, user_id]);
     if (result.rows.length === 0) {
