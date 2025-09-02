@@ -63,7 +63,7 @@ app.post('/api/register', async (req, res) => {
     const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '2h' });
     res.status(201).json({ token, user });
   } catch (err) {
-    if (err.code === '23505') { // Error code for unique_violation
+    if (err.code === '23505') {
       return res.status(409).json({ error: 'Email sudah terdaftar.' });
     }
     console.error('Error saat registrasi:', err.message);
@@ -144,7 +144,7 @@ app.get('/api/cart', authenticateToken, async (req, res) => {
 
 // Rute untuk menambahkan produk ke keranjang (Perbaikan di sini!)
 app.post('/api/cart', authenticateToken, async (req, res) => {
-  const { product_id, quantity } = req.body;
+  const { product_id, quantity = 1 } = req.body;
   const user_id = req.user.id;
 
   if (!product_id) {
@@ -158,7 +158,7 @@ app.post('/api/cart', authenticateToken, async (req, res) => {
     );
 
     if (existingItem.rows.length > 0) {
-      const newQuantity = existingItem.rows[0].quantity + (quantity || 1);
+      const newQuantity = existingItem.rows[0].quantity + quantity;
       const updatedItem = await pool.query(
         'UPDATE cart SET quantity = $1, updated_at = NOW() WHERE user_id = $2 AND product_id = $3 RETURNING *',
         [newQuantity, user_id, product_id]
@@ -167,7 +167,7 @@ app.post('/api/cart', authenticateToken, async (req, res) => {
     } else {
       const newItem = await pool.query(
         'INSERT INTO cart (user_id, product_id, quantity) VALUES ($1, $2, $3) RETURNING *',
-        [user_id, product_id, quantity || 1]
+        [user_id, product_id, quantity]
       );
       res.status(201).json(newItem.rows[0]);
     }
@@ -205,7 +205,7 @@ app.delete('/api/cart/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const user_id = req.user.id;
   try {
-    const result = await pool.query('DELETE FROM cart WHERE id = $1 AND user_id IS NOT DISTINCT FROM $2 RETURNING *', [id, user_id]);
+    const result = await pool.query('DELETE FROM cart WHERE id = $1 AND user_id = $2 RETURNING *', [id, user_id]);
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Item tidak ditemukan atau Anda tidak memiliki akses untuk menghapusnya' });
     }
