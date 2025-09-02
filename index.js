@@ -1,4 +1,3 @@
-// index.js
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -36,9 +35,8 @@ const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
-  if (token == null) {
-    req.user = null;
-    return next();
+  if (!token) {
+    return res.status(401).json({ error: 'Token diperlukan' });
   }
 
   jwt.verify(token, JWT_SECRET, (err, user) => {
@@ -117,22 +115,32 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// --- Modifikasi Rute Cart yang Sudah Ada ---
+// --- Modifikasi Rute Cart ---
 
 app.post('/api/cart', authenticateToken, async (req, res) => {
   const user_id = req.user ? req.user.id : null;
   const { product_id, quantity } = req.body;
-  if (!product_id || !quantity) {
-    return res.status(400).json({ error: 'product_id dan quantity diperlukan' });
+
+  if (!user_id) {
+    return res.status(401).json({ error: 'Silakan login untuk menambahkan ke keranjang' });
   }
+  if (!product_id || !quantity || quantity < 1) {
+    return res.status(400).json({ error: 'product_id dan quantity diperlukan, quantity harus lebih dari 0' });
+  }
+
   try {
+    const product = await pool.query('SELECT * FROM products WHERE id = $1', [product_id]);
+    if (product.rows.length === 0) {
+      return res.status(404).json({ error: 'Produk tidak ditemukan' });
+    }
+
     const existingItem = await pool.query(
-      'SELECT * FROM cart WHERE product_id = $1 AND user_id IS NOT DISTINCT FROM $2',
+      'SELECT * FROM cart WHERE product_id = $1 AND user_id = $2',
       [product_id, user_id]
     );
     if (existingItem.rows.length > 0) {
       const updatedItem = await pool.query(
-        'UPDATE cart SET quantity = quantity + $1 WHERE product_id = $2 AND user_id IS NOT DISTINCT FROM $3 RETURNING *',
+        'UPDATE cart SET quantity = quantity + $1 WHERE product_id = $2 AND user_id = $3 RETURNING *',
         [quantity, product_id, user_id]
       );
       return res.status(200).json(updatedItem.rows[0]);
